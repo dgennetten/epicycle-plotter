@@ -93,14 +93,18 @@
         const [autoStop, setAutoStop] = useState(false);
         const [cycleComplete, setCycleComplete] = useState(false);
         const [fixedFirstCircle, setFixedFirstCircle] = useState(false);
+        const [globalSpeed, setGlobalSpeed] = useState(1.0);
+        const [zoom, setZoom] = useState(1.0);
 
             // Initialize circles array when numCircles changes
             useEffect(() => {
+                console.log('Creating new circles:', numCircles);
                 const newCircles = Array.from({ length: numCircles }, (_, i) => ({
                     radius: Math.max(15, 80 - i * 8), // Better radius distribution with minimum size
                     speed: (i + 1) * 0.5, // Slower speeds for better visualization
                     angle: 0,
                 }));
+                console.log('New circles created:', newCircles);
                 setCircles(newCircles);
                 setPath([]);
                 setTime(0);
@@ -149,14 +153,14 @@
                     setTime(newTime);
                     
                     // Check if circles array is properly initialized
-                    if (circles.length === 0) {
-                        console.log('Circles array is empty, skipping animation frame');
+                    if (circles.length === 0 || circles.length !== numCircles) {
+                        console.log('Circles array mismatch:', { circlesLength: circles.length, numCircles });
                         return;
                     }
                     
                     // Update circles' angles - ALL circles rotate normally
                     const newCircles = circles.map((circle, i) => {
-                        const newAngle = newTime * circle.speed;
+                        const newAngle = newTime * circle.speed * globalSpeed;
                         const newCircle = { ...circle, angle: newAngle };
                         return newCircle;
                     });
@@ -165,7 +169,7 @@
                     const finalX = newCircles.reduce((acc, circle) => acc + circle.radius * Math.cos(circle.angle), originX);
                     const finalY = newCircles.reduce((acc, circle) => acc + circle.radius * Math.sin(circle.angle), originY);
                     
-                    setCircles(newCircles);
+                    // Don't update circles state here - just use the calculated angles for drawing
                     setPath(prevPath => [...prevPath, { x: finalX, y: finalY }]);
                     
                     // Debug: log the first few points to see what's happening
@@ -182,8 +186,8 @@
                         if (fixedFirstCircle) {
                             // When first circle is fixed, stop exactly when canvas completes one full rotation
                             // Check if we've just crossed the 2π threshold
-                            const firstCircleAngle = newTime * newCircles[0].speed;
-                            const previousAngle = (newTime - deltaTime) * newCircles[0].speed;
+                            const firstCircleAngle = newTime * newCircles[0].speed * globalSpeed;
+                            const previousAngle = (newTime - deltaTime) * newCircles[0].speed * globalSpeed;
                             const justCrossedThreshold = previousAngle < 2 * Math.PI && firstCircleAngle >= 2 * Math.PI;
                             
                             // Debug: log the angle and completion status
@@ -216,13 +220,15 @@
                     ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.1)' : 'rgba(255, 255, 255, 0.1)';
                     ctx.fillRect(0, 0, width, height);
 
-                    // Apply counter-rotation if first circle is fixed
+                    // Apply zoom and counter-rotation if first circle is fixed
+                    ctx.save();
+                    ctx.translate(originX, originY);
+                    ctx.scale(zoom, zoom);
+                    ctx.translate(-originX, -originY);
+                    
                     if (fixedFirstCircle) {
-                        ctx.save();
-                        ctx.translate(originX, originY);
                         // Counter-rotate at the same speed as the first circle would normally rotate
-                        ctx.rotate(-newTime * newCircles[0].speed);
-                        ctx.translate(-originX, -originY);
+                        ctx.rotate(-newTime * newCircles[0].speed * globalSpeed);
                     }
 
                     // Draw the epicycles
@@ -260,10 +266,8 @@
                         ctx.stroke();
                     }
 
-                    // Restore canvas context if rotation was applied
-                    if (fixedFirstCircle) {
-                        ctx.restore();
-                    }
+                    // Restore canvas context (zoom and rotation)
+                    ctx.restore();
 
                     // Only continue animation if cycle is not complete
                     if (!cycleComplete) {
@@ -276,7 +280,7 @@
                 }
                 
                 return () => cancelAnimationFrame(animationFrameId);
-            }, [isPlaying, circles, time, lastFrameTime, darkMode, autoStop, cycleComplete, fixedFirstCircle]);
+            }, [isPlaying, circles, time, lastFrameTime, darkMode, autoStop, cycleComplete, fixedFirstCircle, globalSpeed, zoom]);
 
             // Set up canvas size on window load
             useEffect(() => {
@@ -284,8 +288,18 @@
                 if (!canvas) return;
                 
                 const updateSize = () => {
-                    const newWidth = Math.max(400, window.innerWidth * 0.7); // Minimum 400px width
-                    const newHeight = Math.max(300, window.innerHeight * 0.8); // Minimum 300px height
+                    const isMobilePortrait = window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+                    
+                    let newWidth, newHeight;
+                    if (isMobilePortrait) {
+                        // On mobile portrait, use most of the available width and height
+                        newWidth = Math.max(300, window.innerWidth * 0.95);
+                        newHeight = Math.max(200, window.innerHeight * 0.6); // Leave room for controls
+                    } else {
+                        // On desktop/landscape, use the original sizing
+                        newWidth = Math.max(600, window.innerWidth * 0.85);
+                        newHeight = Math.max(400, window.innerHeight * 0.9);
+                    }
                     
                     canvas.width = newWidth;
                     canvas.height = newHeight;
@@ -316,6 +330,15 @@
                 setTime(0);
                 setLastFrameTime(performance.now());
                 setCycleComplete(false);
+                
+                // If paused, reposition circles to start
+                if (!isPlaying) {
+                    const newCircles = circles.map(circle => ({
+                        ...circle,
+                        angle: 0
+                    }));
+                    setCircles(newCircles);
+                }
             };
 
             const handlePlayPause = () => {
@@ -326,20 +349,28 @@
                 }
             };
 
+            const handleZoomIn = () => {
+                setZoom(prevZoom => Math.min(prevZoom * 1.25, 5.0)); // Max 5x zoom
+            };
+
+            const handleZoomOut = () => {
+                setZoom(prevZoom => Math.max(prevZoom / 1.25, 0.25)); // Min 0.25x zoom
+            };
+
             return React.createElement('div', {
                 className: `flex flex-col md:flex-row h-screen font-inter ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-900'}`
             }, [
                 React.createElement('div', {
                     key: 'controls',
-                    className: 'p-6 md:w-1/4 flex flex-col space-y-4 overflow-y-auto'
+                    className: 'p-2 md:p-4 h-1/3 md:h-auto md:w-1/4 flex flex-col space-y-2 md:space-y-3 overflow-y-auto'
                 }, [
                     React.createElement('h1', {
                         key: 'title',
-                        className: 'text-3xl font-bold text-indigo-400 mb-2'
+                        className: 'text-xl md:text-2xl font-bold text-indigo-400 mb-1'
                     }, 'Epicycle Spirograph'),
                     React.createElement('p', {
                         key: 'description',
-                        className: 'text-sm text-slate-400'
+                        className: 'text-xs text-slate-400 mb-2 hidden md:block'
                     }, 'Control the parameters below to generate your own unique spirograph patterns. The final shape is a result of the combined motion of all circles. When "Fix First Circle" is enabled, the first circle stays stationary while the canvas rotates.'),
                     
                     // Cycle Status
@@ -420,8 +451,65 @@
                          React.createElement('div', {
                              key: 'angleValue',
                              className: 'font-mono text-indigo-400'
-                         }, `${(time * circles[0]?.speed || 0).toFixed(3)} / ${(2 * Math.PI).toFixed(3)} radians`)
+                         }, `${(time * circles[0]?.speed * globalSpeed || 0).toFixed(3)} / ${(2 * Math.PI).toFixed(3)} radians`)
                      ]),
+
+                    // Global Speed Slider
+                    React.createElement('div', {
+                        key: 'globalSpeed',
+                        className: 'space-y-1'
+                    }, [
+                        React.createElement('label', {
+                            key: 'label',
+                            htmlFor: 'globalSpeed',
+                            className: 'block text-sm font-medium'
+                        }, 'Global Speed:'),
+                        React.createElement('div', {
+                            key: 'speedControls',
+                            className: 'flex items-center space-x-2'
+                        }, [
+                            React.createElement('button', {
+                                key: 'decrease',
+                                onClick: () => {
+                                    const newSpeed = Math.max(0.1, globalSpeed / 1.25);
+                                    setGlobalSpeed(Math.round(newSpeed * 10) / 10);
+                                },
+                                className: 'px-2 py-1 rounded-md bg-slate-600 hover:bg-slate-700 text-white font-bold text-sm transition-colors'
+                            }, '−'),
+                            React.createElement('div', {
+                                key: 'sliderContainer',
+                                className: 'flex-1'
+                            }, [
+                                React.createElement('input', {
+                                    key: 'input',
+                                    type: 'range',
+                                    id: 'globalSpeed',
+                                    min: '0',
+                                    max: '100',
+                                    step: '1',
+                                    value: Math.log10(globalSpeed / 0.1) * 100 / Math.log10(100),
+                                    onChange: (e) => {
+                                        const logValue = (e.target.value / 100) * Math.log10(100);
+                                        const newSpeed = 0.1 * Math.pow(10, logValue);
+                                        setGlobalSpeed(Math.round(newSpeed * 10) / 10);
+                                    },
+                                    className: 'w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-indigo-500'
+                                })
+                            ]),
+                            React.createElement('button', {
+                                key: 'increase',
+                                onClick: () => {
+                                    const newSpeed = Math.min(10, globalSpeed * 1.25);
+                                    setGlobalSpeed(Math.round(newSpeed * 10) / 10);
+                                },
+                                className: 'px-2 py-1 rounded-md bg-slate-600 hover:bg-slate-700 text-white font-bold text-sm transition-colors'
+                            }, '+')
+                        ]),
+                        React.createElement('div', {
+                            key: 'speedValue',
+                            className: 'text-xs text-slate-400 text-center'
+                        }, `${globalSpeed.toFixed(1)}x`)
+                    ]),
 
                     // Number of circles input
                     React.createElement('div', {
@@ -433,27 +521,42 @@
                             htmlFor: 'numCircles',
                             className: 'block text-sm font-medium'
                         }, 'Number of Circles:'),
-                        React.createElement('input', {
-                            key: 'input',
-                            type: 'number',
-                            id: 'numCircles',
-                            min: '1',
-                            max: '10',
-                            value: numCircles,
-                            onChange: (e) => setNumCircles(Math.max(1, Math.min(10, parseInt(e.target.value)))),
-                            className: 'w-full rounded-md shadow-sm bg-slate-700 text-slate-100 border-slate-600 focus:border-indigo-500 focus:ring-indigo-500'
-                        })
+                        React.createElement('div', {
+                            key: 'inputContainer',
+                            className: 'flex items-center space-x-2'
+                        }, [
+                            React.createElement('button', {
+                                key: 'decrease',
+                                onClick: () => setNumCircles(Math.max(1, numCircles - 1)),
+                                className: 'px-2 py-1 rounded-md bg-slate-600 hover:bg-slate-700 text-white font-bold text-sm transition-colors'
+                            }, '−'),
+                            React.createElement('input', {
+                                key: 'input',
+                                type: 'number',
+                                id: 'numCircles',
+                                min: '1',
+                                max: '10',
+                                value: numCircles,
+                                onChange: (e) => setNumCircles(Math.max(1, Math.min(10, parseInt(e.target.value) || 1))),
+                                className: 'flex-1 text-center rounded-md shadow-sm bg-slate-700 text-slate-100 border-slate-600 focus:border-indigo-500 focus:ring-indigo-500'
+                            }),
+                            React.createElement('button', {
+                                key: 'increase',
+                                onClick: () => setNumCircles(Math.min(10, numCircles + 1)),
+                                className: 'px-2 py-1 rounded-md bg-slate-600 hover:bg-slate-700 text-white font-bold text-sm transition-colors'
+                            }, '+')
+                        ])
                     ]),
 
                     // Individual circle controls
                     ...circles.map((circle, index) => 
                         React.createElement('div', {
                             key: `circle-${index}`,
-                            className: `p-4 rounded-lg border ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`
+                            className: `p-2 md:p-3 rounded-lg border ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`
                         }, [
                             React.createElement('h3', {
                                 key: 'title',
-                                className: 'text-lg font-semibold mb-2 text-indigo-400'
+                                className: 'text-sm md:text-base font-semibold mb-1 text-indigo-400'
                             }, [
                                 `Circle ${index + 1}`,
                                 fixedFirstCircle && index === 0 && React.createElement('span', {
@@ -511,7 +614,7 @@
 
                 React.createElement('div', {
                     key: 'canvas',
-                    className: 'flex-1 flex flex-col justify-center items-center p-4'
+                    className: 'flex-1 md:flex-1 flex justify-center items-center p-4 relative'
                 }, [
                     React.createElement('canvas', {
                         key: 'canvas',
@@ -519,20 +622,31 @@
                         className: `shadow-lg rounded-lg ${darkMode ? 'bg-slate-800' : 'bg-gray-100'}`,
                         style: { border: `1px solid ${darkMode ? '#4b5563' : '#d1d5db'}` }
                     }),
+                    // Overlay buttons on top-right corner of canvas
                     React.createElement('div', {
                         key: 'buttons',
-                        className: 'flex space-x-4 mt-4'
+                        className: 'absolute top-0 right-0 flex space-x-2 p-2'
                     }, [
+                        React.createElement('button', {
+                            key: 'zoomOut',
+                            onClick: handleZoomOut,
+                            className: 'px-3 py-2 rounded-lg text-slate-100 font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-slate-600 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 text-sm'
+                        }, '−'),
+                        React.createElement('button', {
+                            key: 'zoomIn',
+                            onClick: handleZoomIn,
+                            className: 'px-3 py-2 rounded-lg text-slate-100 font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-slate-600 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 text-sm'
+                        }, '+'),
                         React.createElement('button', {
                             key: 'playPause',
                             onClick: handlePlayPause,
-                            className: 'px-6 py-2 rounded-lg text-white font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
-                        }, isPlaying ? 'Pause' : 'Play'),
+                            className: 'px-4 py-2 rounded-lg text-white font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 text-sm'
+                        }, isPlaying ? '⏸' : '▶'),
                         React.createElement('button', {
                             key: 'reset',
                             onClick: resetPlotter,
-                            className: 'px-6 py-2 rounded-lg text-slate-100 font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-slate-600 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500'
-                        }, 'Reset')
+                            className: 'px-4 py-2 rounded-lg text-slate-100 font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-slate-600 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 text-sm'
+                        }, '↺')
                     ])
                 ])
             ]);
