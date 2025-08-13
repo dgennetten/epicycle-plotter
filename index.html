@@ -158,7 +158,7 @@
                         return;
                     }
                     
-                    // Update circles' angles - ALL circles rotate normally
+                    // Update circles' angles
                     const newCircles = circles.map((circle, i) => {
                         const newAngle = newTime * circle.speed * globalSpeed;
                         const newCircle = { ...circle, angle: newAngle };
@@ -220,16 +220,18 @@
                     ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.1)' : 'rgba(255, 255, 255, 0.1)';
                     ctx.fillRect(0, 0, width, height);
 
-                    // Apply zoom and counter-rotation if first circle is fixed
+                    // Apply zoom and transformations
                     ctx.save();
                     ctx.translate(originX, originY);
                     ctx.scale(zoom, zoom);
-                    ctx.translate(-originX, -originY);
                     
                     if (fixedFirstCircle) {
-                        // Counter-rotate at the same speed as the first circle would normally rotate
-                        ctx.rotate(-newTime * newCircles[0].speed * globalSpeed);
+                        // Counter-rotate the entire coordinate system
+                        // This makes the first circle appear stationary at the center
+                        ctx.rotate(-newTime * circles[0].speed * globalSpeed);
                     }
+                    
+                    ctx.translate(-originX, -originY);
 
                     // Draw the epicycles
                     let prevX = originX;
@@ -429,7 +431,11 @@
                              type: 'checkbox',
                              id: 'fixedFirstCircleToggle',
                              checked: fixedFirstCircle,
-                             onChange: () => setFixedFirstCircle(!fixedFirstCircle),
+                             onChange: () => {
+                                 setFixedFirstCircle(!fixedFirstCircle);
+                                 // Auto-reset when fixed first circle is toggled
+                                 resetPlotter();
+                             },
                              className: 'h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded'
                          }),
                          React.createElement('label', {
