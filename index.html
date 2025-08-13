@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epicycle Spirograph</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Custom scrollbar for webkit browsers */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* Range input styling */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-track {
+            background: #475569;
+            height: 8px;
+            border-radius: 4px;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #6366f1;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-track {
+            background: #475569;
+            height: 8px;
+            border-radius: 4px;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            background: #6366f1;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script>
+        const { useState, useEffect, useRef } = React;
+
+        const App = () => {
+            const canvasRef = useRef(null);
+            const [numCircles, setNumCircles] = useState(3);
+            const [circles, setCircles] = useState([]);
+            const [path, setPath] = useState([]);
+            const [time, setTime] = useState(0);
+                    const [isPlaying, setIsPlaying] = useState(false);
+        const [lastFrameTime, setLastFrameTime] = useState(0);
+        const [darkMode, setDarkMode] = useState(true);
+        const [autoStop, setAutoStop] = useState(false);
+        const [cycleComplete, setCycleComplete] = useState(false);
+        const [fixedFirstCircle, setFixedFirstCircle] = useState(false);
+
+            // Initialize circles array when numCircles changes
+            useEffect(() => {
+                const newCircles = Array.from({ length: numCircles }, (_, i) => ({
+                    radius: Math.max(15, 80 - i * 8), // Better radius distribution with minimum size
+                    speed: (i + 1) * 0.5, // Slower speeds for better visualization
+                    angle: 0,
+                }));
+                setCircles(newCircles);
+                setPath([]);
+                setTime(0);
+                setCycleComplete(false);
+                
+                // Ensure canvas is properly initialized
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = darkMode ? '#0f172a' : '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            }, [numCircles, darkMode]);
+
+            // Animation loop
+            useEffect(() => {
+                let animationFrameId;
+
+                const animate = (timestamp) => {
+                    if (!isPlaying) {
+                        setLastFrameTime(timestamp);
+                        return;
+                    }
+
+                    // Calculate delta time for consistent speed
+                    const deltaTime = (timestamp - lastFrameTime) / 1000;
+                    setLastFrameTime(timestamp);
+                    
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    
+                    const ctx = canvas.getContext('2d');
+                    const width = canvas.width;
+                    const height = canvas.height;
+                    
+                    // Check if canvas has valid dimensions
+                    if (width === 0 || height === 0) {
+                        console.log('Canvas has invalid dimensions:', { width, height });
+                        return;
+                    }
+                    
+                    const originX = width / 2;
+                    const originY = height / 2;
+                    
+                    const newTime = time + deltaTime;
+                    setTime(newTime);
+                    
+                    // Check if circles array is properly initialized
+                    if (circles.length === 0) {
+                        console.log('Circles array is empty, skipping animation frame');
+                        return;
+                    }
+                    
+                    // Update circles' angles - ALL circles rotate normally
+                    const newCircles = circles.map((circle, i) => {
+                        const newAngle = newTime * circle.speed;
+                        const newCircle = { ...circle, angle: newAngle };
+                        return newCircle;
+                    });
+
+                    // Calculate final point - all circles contribute normally
+                    const finalX = newCircles.reduce((acc, circle) => acc + circle.radius * Math.cos(circle.angle), originX);
+                    const finalY = newCircles.reduce((acc, circle) => acc + circle.radius * Math.sin(circle.angle), originY);
+                    
+                    setCircles(newCircles);
+                    setPath(prevPath => [...prevPath, { x: finalX, y: finalY }]);
+                    
+                    // Debug: log the first few points to see what's happening
+                    if (path.length < 5) {
+                        console.log('Point added:', { x: finalX, y: finalY }, 'Path length:', path.length + 1);
+                        console.log('Circles:', newCircles.map(c => ({ radius: c.radius, speed: c.speed, angle: c.angle })));
+                    }
+
+                    // Check if cycle is complete (when all circles return to their starting positions)
+                    if (autoStop && !cycleComplete) {
+                        const tolerance = 5; // pixels tolerance for position matching
+                        let startX, startY;
+                        
+                        if (fixedFirstCircle) {
+                            // When first circle is fixed, stop exactly when canvas completes one full rotation
+                            // Check if we've just crossed the 2π threshold
+                            const firstCircleAngle = newTime * newCircles[0].speed;
+                            const previousAngle = (newTime - deltaTime) * newCircles[0].speed;
+                            const justCrossedThreshold = previousAngle < 2 * Math.PI && firstCircleAngle >= 2 * Math.PI;
+                            
+                            // Debug: log the angle and completion status
+                            if (path.length % 100 === 0) {
+                                console.log('Fixed mode - First circle angle:', firstCircleAngle.toFixed(3), 'radians, Just crossed:', justCrossedThreshold);
+                            }
+                            
+                            if (justCrossedThreshold && path.length > 50) {
+                                console.log('Cycle complete! First circle angle:', firstCircleAngle.toFixed(3), 'radians');
+                                setCycleComplete(true);
+                                setIsPlaying(false);
+                                // Don't return here - let this frame complete to close the path
+                            }
+                        } else {
+                            // Normal behavior - check if final position matches starting position
+                            startX = originX + newCircles.reduce((acc, circle) => acc + circle.radius, 0);
+                            startY = originY;
+                            
+                            if (Math.abs(finalX - startX) < tolerance && Math.abs(finalY - startY) < tolerance) {
+                                // Check if we have enough points to confirm it's a complete cycle
+                                if (path.length > 50) {
+                                    setCycleComplete(true);
+                                    setIsPlaying(false);
+                                }
+                            }
+                        }
+                    }
+
+                    // Clear the canvas with a fade effect
+                    ctx.fillStyle = darkMode ? 'rgba(15, 23, 42, 0.1)' : 'rgba(255, 255, 255, 0.1)';
+                    ctx.fillRect(0, 0, width, height);
+
+                    // Apply counter-rotation if first circle is fixed
+                    if (fixedFirstCircle) {
+                        ctx.save();
+                        ctx.translate(originX, originY);
+                        // Counter-rotate at the same speed as the first circle would normally rotate
+                        ctx.rotate(-newTime * newCircles[0].speed);
+                        ctx.translate(-originX, -originY);
+                    }
+
+                    // Draw the epicycles
+                    let prevX = originX;
+                    let prevY = originY;
+                    ctx.strokeStyle = darkMode ? '#4b5563' : '#d1d5db';
+                    ctx.lineWidth = 1;
+
+                    newCircles.forEach(circle => {
+                        ctx.beginPath();
+                        ctx.arc(prevX, prevY, circle.radius, 0, 2 * Math.PI);
+                        ctx.stroke();
+
+                        ctx.beginPath();
+                        ctx.moveTo(prevX, prevY);
+                        const nextX = prevX + circle.radius * Math.cos(circle.angle);
+                        const nextY = prevY + circle.radius * Math.sin(circle.angle);
+                        ctx.lineTo(nextX, nextY);
+                        ctx.stroke();
+
+                        prevX = nextX;
+                        prevY = nextY;
+                    });
+
+                    // Draw the path - use the current path state, not the stale one
+                    const currentPath = [...path, { x: finalX, y: finalY }];
+                    if (currentPath.length > 1) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = darkMode ? '#6366f1' : '#4f46e5';
+                        ctx.lineWidth = 2;
+                        ctx.moveTo(currentPath[0].x, currentPath[0].y);
+                        for (let i = 1; i < currentPath.length; i++) {
+                            ctx.lineTo(currentPath[i].x, currentPath[i].y);
+                        }
+                        ctx.stroke();
+                    }
+
+                    // Restore canvas context if rotation was applied
+                    if (fixedFirstCircle) {
+                        ctx.restore();
+                    }
+
+                    // Only continue animation if cycle is not complete
+                    if (!cycleComplete) {
+                        animationFrameId = requestAnimationFrame(animate);
+                    }
+                };
+
+                if (isPlaying) {
+                    animationFrameId = requestAnimationFrame(animate);
+                }
+                
+                return () => cancelAnimationFrame(animationFrameId);
+            }, [isPlaying, circles, time, lastFrameTime, darkMode, autoStop, cycleComplete, fixedFirstCircle]);
+
+            // Set up canvas size on window load
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                
+                const updateSize = () => {
+                    const newWidth = Math.max(400, window.innerWidth * 0.7); // Minimum 400px width
+                    const newHeight = Math.max(300, window.innerHeight * 0.8); // Minimum 300px height
+                    
+                    canvas.width = newWidth;
+                    canvas.height = newHeight;
+                    
+                    console.log('Canvas resized to:', { width: newWidth, height: newHeight });
+                    
+                    // Clear canvas on resize
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = darkMode ? '#0f172a' : '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    setPath([]); // Reset path on resize
+                };
+                
+                // Wait for next tick to ensure canvas is ready
+                setTimeout(updateSize, 0);
+                window.addEventListener('resize', updateSize);
+                return () => window.removeEventListener('resize', updateSize);
+            }, [darkMode]);
+
+            const handleCircleChange = (index, key, value) => {
+                const newCircles = [...circles];
+                newCircles[index][key] = parseFloat(value);
+                setCircles(newCircles);
+            };
+
+            const resetPlotter = () => {
+                setPath([]);
+                setTime(0);
+                setLastFrameTime(performance.now());
+                setCycleComplete(false);
+            };
+
+            const handlePlayPause = () => {
+                setIsPlaying(!isPlaying);
+                setLastFrameTime(performance.now());
+                if (isPlaying) {
+                    setCycleComplete(false);
+                }
+            };
+
+            return React.createElement('div', {
+                className: `flex flex-col md:flex-row h-screen font-inter ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-white text-gray-900'}`
+            }, [
+                React.createElement('div', {
+                    key: 'controls',
+                    className: 'p-6 md:w-1/4 flex flex-col space-y-4 overflow-y-auto'
+                }, [
+                    React.createElement('h1', {
+                        key: 'title',
+                        className: 'text-3xl font-bold text-indigo-400 mb-2'
+                    }, 'Epicycle Spirograph'),
+                    React.createElement('p', {
+                        key: 'description',
+                        className: 'text-sm text-slate-400'
+                    }, 'Control the parameters below to generate your own unique spirograph patterns. The final shape is a result of the combined motion of all circles. When "Fix First Circle" is enabled, the first circle stays stationary while the canvas rotates.'),
+                    
+                    // Cycle Status
+                    cycleComplete && React.createElement('div', {
+                        key: 'cycleStatus',
+                        className: 'p-3 rounded-lg bg-green-600 text-white text-sm font-medium text-center'
+                    }, '✓ Cycle Complete! Pattern has finished one full rotation.'),
+                    
+                    // Dark Mode Toggle
+                    React.createElement('div', {
+                        key: 'darkModeToggle',
+                        className: 'flex items-center space-x-2'
+                    }, [
+                        React.createElement('input', {
+                            key: 'checkbox',
+                            type: 'checkbox',
+                            id: 'darkModeToggle',
+                            checked: darkMode,
+                            onChange: () => setDarkMode(!darkMode),
+                            className: 'h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded'
+                        }),
+                        React.createElement('label', {
+                            key: 'label',
+                            htmlFor: 'darkModeToggle',
+                            className: 'text-sm font-medium'
+                        }, 'Dark Mode')
+                    ]),
+
+                    // Auto-Stop Toggle
+                    React.createElement('div', {
+                        key: 'autoStopToggle',
+                        className: 'flex items-center space-x-2'
+                    }, [
+                        React.createElement('input', {
+                            key: 'checkbox',
+                            type: 'checkbox',
+                            id: 'autoStopToggle',
+                            checked: autoStop,
+                            onChange: () => setAutoStop(!autoStop),
+                            className: 'h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded'
+                        }),
+                        React.createElement('label', {
+                            key: 'label',
+                            htmlFor: 'autoStopToggle',
+                            className: 'text-sm font-medium'
+                        }, 'Auto-Stop on Cycle Complete')
+                    ]),
+
+                                         // Fixed First Circle Toggle
+                     React.createElement('div', {
+                         key: 'fixedFirstCircleToggle',
+                         className: 'flex items-center space-x-2'
+                     }, [
+                         React.createElement('input', {
+                             key: 'checkbox',
+                             type: 'checkbox',
+                             id: 'fixedFirstCircleToggle',
+                             checked: fixedFirstCircle,
+                             onChange: () => setFixedFirstCircle(!fixedFirstCircle),
+                             className: 'h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded'
+                         }),
+                         React.createElement('label', {
+                             key: 'label',
+                             htmlFor: 'fixedFirstCircleToggle',
+                             className: 'text-sm font-medium'
+                         }, 'Fix First Circle (Rotate Canvas)')
+                     ]),
+                     
+                     // Show current angle when fixed mode is on
+                     fixedFirstCircle && isPlaying && React.createElement('div', {
+                         key: 'angleDisplay',
+                         className: 'p-2 rounded-lg bg-slate-700 text-xs text-center'
+                     }, [
+                         React.createElement('div', {
+                             key: 'angleLabel',
+                             className: 'text-slate-400 mb-1'
+                         }, 'First Circle Angle:'),
+                         React.createElement('div', {
+                             key: 'angleValue',
+                             className: 'font-mono text-indigo-400'
+                         }, `${(time * circles[0]?.speed || 0).toFixed(3)} / ${(2 * Math.PI).toFixed(3)} radians`)
+                     ]),
+
+                    // Number of circles input
+                    React.createElement('div', {
+                        key: 'numCircles',
+                        className: 'space-y-1'
+                    }, [
+                        React.createElement('label', {
+                            key: 'label',
+                            htmlFor: 'numCircles',
+                            className: 'block text-sm font-medium'
+                        }, 'Number of Circles:'),
+                        React.createElement('input', {
+                            key: 'input',
+                            type: 'number',
+                            id: 'numCircles',
+                            min: '1',
+                            max: '10',
+                            value: numCircles,
+                            onChange: (e) => setNumCircles(Math.max(1, Math.min(10, parseInt(e.target.value)))),
+                            className: 'w-full rounded-md shadow-sm bg-slate-700 text-slate-100 border-slate-600 focus:border-indigo-500 focus:ring-indigo-500'
+                        })
+                    ]),
+
+                    // Individual circle controls
+                    ...circles.map((circle, index) => 
+                        React.createElement('div', {
+                            key: `circle-${index}`,
+                            className: `p-4 rounded-lg border ${darkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`
+                        }, [
+                            React.createElement('h3', {
+                                key: 'title',
+                                className: 'text-lg font-semibold mb-2 text-indigo-400'
+                            }, [
+                                `Circle ${index + 1}`,
+                                fixedFirstCircle && index === 0 && React.createElement('span', {
+                                    key: 'fixedIndicator',
+                                    className: 'ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded'
+                                }, 'FIXED')
+                            ]),
+                            React.createElement('div', {
+                                key: 'controls',
+                                className: 'space-y-2'
+                            }, [
+                                React.createElement('label', {
+                                    key: 'radiusLabel',
+                                    className: 'block text-sm font-medium'
+                                }, [
+                                    'Radius:',
+                                    React.createElement('input', {
+                                        key: 'radiusInput',
+                                        type: 'range',
+                                        min: '5',
+                                        max: '100',
+                                        value: circle.radius,
+                                        onChange: (e) => handleCircleChange(index, 'radius', e.target.value),
+                                        className: 'w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-indigo-500 mt-1'
+                                    }),
+                                    React.createElement('span', {
+                                        key: 'radiusValue',
+                                        className: 'text-xs text-slate-400'
+                                    }, `${circle.radius.toFixed(0)} px`)
+                                ]),
+                                React.createElement('label', {
+                                    key: 'speedLabel',
+                                    className: 'block text-sm font-medium'
+                                }, [
+                                    'Speed:',
+                                    React.createElement('input', {
+                                        key: 'speedInput',
+                                        type: 'range',
+                                        min: '-10',
+                                        max: '10',
+                                        step: '0.1',
+                                        value: circle.speed,
+                                        onChange: (e) => handleCircleChange(index, 'speed', e.target.value),
+                                        className: 'w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-indigo-500 mt-1'
+                                    }),
+                                    React.createElement('span', {
+                                        key: 'speedValue',
+                                        className: 'text-xs text-slate-400'
+                                    }, `${circle.speed.toFixed(1)}x`)
+                                ])
+                            ])
+                        ])
+                    )
+                ]),
+
+                React.createElement('div', {
+                    key: 'canvas',
+                    className: 'flex-1 flex flex-col justify-center items-center p-4'
+                }, [
+                    React.createElement('canvas', {
+                        key: 'canvas',
+                        ref: canvasRef,
+                        className: `shadow-lg rounded-lg ${darkMode ? 'bg-slate-800' : 'bg-gray-100'}`,
+                        style: { border: `1px solid ${darkMode ? '#4b5563' : '#d1d5db'}` }
+                    }),
+                    React.createElement('div', {
+                        key: 'buttons',
+                        className: 'flex space-x-4 mt-4'
+                    }, [
+                        React.createElement('button', {
+                            key: 'playPause',
+                            onClick: handlePlayPause,
+                            className: 'px-6 py-2 rounded-lg text-white font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+                        }, isPlaying ? 'Pause' : 'Play'),
+                        React.createElement('button', {
+                            key: 'reset',
+                            onClick: resetPlotter,
+                            className: 'px-6 py-2 rounded-lg text-slate-100 font-semibold transition-all duration-200 shadow-md transform hover:scale-105 active:scale-95 bg-slate-600 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500'
+                        }, 'Reset')
+                    ])
+                ])
+            ]);
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('app'));
+        root.render(React.createElement(React.StrictMode, null, React.createElement(App)));
+    </script>
+</body>
+</html>
